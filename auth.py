@@ -1,201 +1,189 @@
 import streamlit as st
 import bcrypt
 from db import fetch_one, execute_query
+from components.ui import hero
+from utils.email_service import generate_otp, send_verification_email
+from email_validator import validate_email, EmailNotValidError
+from datetime import datetime, timedelta
 
 
-# ── Password helpers ──────────────────────────────────────────────────────────
-def hash_password(plain: str) -> bytes:
-    """Returns a bcrypt hash of the plain-text password."""
-    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt())
+def hash_password(plain: str):
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt())
 
 
-def verify_password(plain: str, hashed: bytes) -> bool:
-    """Returns True if plain matches the stored bcrypt hash."""
+def verify_password(plain: str, hashed):
     try:
-        return bcrypt.checkpw(plain.encode("utf-8"), hashed)
-    except Exception:
+        return bcrypt.checkpw(plain.encode(), hashed)
+    except:
         return False
 
 
-# ── Registration ──────────────────────────────────────────────────────────────
-def register_user(conn, username: str, password: str) -> bool:
-    """
-    Inserts a new user with role='user'.
-    Returns True on success, False if the username is already taken.
-    """
-    existing = fetch_one(
-        conn,
-        "SELECT id FROM users WHERE username = %s",
-        (username,),
-    )
-    if existing:
-        return False  # username already taken
-
-    hashed = hash_password(password)
-    execute_query(
-        conn,
-        "INSERT INTO users (username, password, role) VALUES (%s, %s, %s)",
-        (username, hashed, "user"),
-    )
-    return True
-
-
-def register_page(conn):
-    """
-    Streamlit UI for new user registration.
-    On success sets session_state and reruns into the main app.
-    """
-    st.title("Create an account")
-
-    username = st.text_input("Username", max_chars=80, key="reg_username")
-    password = st.text_input("Password", type="password", key="reg_password")
-    confirm  = st.text_input("Confirm password", type="password", key="reg_confirm")
-
-    if st.button("Register", use_container_width=True):
-        # ── Validation ────────────────────────────────────────────────────────
-        if not username or not password:
-            st.warning("Username and password are required.")
-            return
-
-        if len(username) < 3:
-            st.warning("Username must be at least 3 characters.")
-            return
-
-        if len(password) < 6:
-            st.warning("Password must be at least 6 characters.")
-            return
-
-        if password != confirm:
-            st.error("Passwords do not match.")
-            return
-
-        # ── Attempt registration ──────────────────────────────────────────────
-        success = register_user(conn, username.strip(), password)
-
-        if not success:
-            st.error("That username is already taken. Please choose another.")
-            return
-
-        # Auto-login after successful registration
-        user = fetch_one(
-            conn,
-            "SELECT id, username, role FROM users WHERE username = %s",
-            (username.strip(),),
-        )
-        st.session_state["user"] = user
-        st.success("Account created! Redirecting...")
-        st.rerun()
-
-
-# ── Login ─────────────────────────────────────────────────────────────────────
-def authenticate(conn, username: str, password: str):
-    """
-    Looks up the user by username and verifies the password.
-    Returns the user dict (id, username, role) on success, or None on failure.
-    """
+def authenticate(conn, username, password):
     row = fetch_one(
         conn,
-        "SELECT id, username, password, role FROM users WHERE username = %s",
-        (username.strip(),),
+        """
+        SELECT id, username, password, role, is_verified
+        FROM users
+        WHERE username = %s
+        """,
+        (username,)
     )
+
     if not row:
+        return None
+
+    if not row["is_verified"]:
+        st.error("Please verify your email first.")
         return None
 
     stored_hash = row["password"]
 
-    # mysql-connector returns BLOB columns as bytes; VARCHAR may come as str.
     if isinstance(stored_hash, str):
-        stored_hash = stored_hash.encode("utf-8")
+        stored_hash = stored_hash.encode()
 
     if not verify_password(password, stored_hash):
         return None
 
-    # Return only safe fields — never expose the password hash
     return {
-        "id":       row["id"],
+        "id": row["id"],
         "username": row["username"],
-        "role":     row["role"],
+        "role": row["role"],
     }
 
 
+def register_page(conn):
+    hero("🚀 Create Account", "Secure signup with email verification")
+
+    if "otp_sent" not in st.session_state:
+        st.session_state["otp_sent"] = False
+
+    if not st.session_state["otp_sent"]:
+        username = st.text_input("Username")
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        confirm = st.text_input("Confirm Password", type="password")
+
+        if st.button("Send OTP", use_container_width=True):
+            try:
+                validate_email(email)
+            except EmailNotValidError as e:
+                st.error(str(e))
+                return
+
+            if password != confirm:
+                st.error("Passwords do not match")
+                return
+
+            existing = fetch_one(
+                conn,
+                "SELECT id FROM users WHERE username=%s OR email=%s",
+                (username, email)
+            )
+
+            if existing:
+                st.error("Username or email already exists")
+                return
+
+            otp = generate_otp()
+
+            expiry = datetime.now() + timedelta(minutes=5)
+
+            st.session_state["pending_user"] = {
+                "username": username,
+                "email": email,
+                "password": password,
+                "otp": otp,
+                "expiry": expiry
+            }
+
+            send_verification_email(email, otp)
+
+            st.session_state["otp_sent"] = True
+            st.success("OTP sent to your email")
+            st.rerun()
+
+    else:
+        otp_input = st.text_input("Enter OTP")
+
+        if st.button("Verify OTP", use_container_width=True):
+            pending = st.session_state["pending_user"]
+
+            if datetime.now() > pending["expiry"]:
+                st.error("OTP expired")
+                st.session_state["otp_sent"] = False
+                return
+
+            if otp_input != pending["otp"]:
+                st.error("Invalid OTP")
+                return
+
+            hashed = hash_password(pending["password"])
+
+            execute_query(
+                conn,
+                """
+                INSERT INTO users
+                (username, email, password, role, is_verified)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    pending["username"],
+                    pending["email"],
+                    hashed,
+                    "user",
+                    True
+                )
+            )
+
+            user = fetch_one(
+                conn,
+                "SELECT id, username, role FROM users WHERE username=%s",
+                (pending["username"],)
+            )
+
+            st.session_state["user"] = user
+            st.session_state["otp_sent"] = False
+            st.success("Account verified successfully!")
+            st.rerun()
+
+
 def login_page(conn):
-    """
-    Streamlit UI for user login.
-    On success sets session_state['user'] and reruns into the main app.
-    """
-    st.title("Sign in")
+    hero("🔐 Welcome Back", "Login securely")
 
-    username = st.text_input("Username", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
-
-    # Track failed attempts in session state to throttle brute-force
-    if "login_attempts" not in st.session_state:
-        st.session_state["login_attempts"] = 0
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
     if st.button("Login", use_container_width=True):
-        if not username or not password:
-            st.warning("Please enter both username and password.")
-            return
-
-        if st.session_state["login_attempts"] >= 5:
-            st.error("Too many failed attempts. Please restart the app.")
-            return
-
         user = authenticate(conn, username, password)
 
-        if user is None:
-            st.session_state["login_attempts"] += 1
-            remaining = 5 - st.session_state["login_attempts"]
-            st.error(
-                f"Invalid username or password. "
-                f"{remaining} attempt(s) remaining."
-            )
-            return
-
-        # Success — store user and reset attempt counter
-        st.session_state["user"] = user
-        st.session_state["login_attempts"] = 0
-        st.rerun()
+        if user:
+            st.session_state["user"] = user
+            st.rerun()
 
 
-# ── Logout ────────────────────────────────────────────────────────────────────
 def logout():
-    """
-    Clears all session state and reruns back to the login screen.
-    Wipes quiz progress, timer state, and user identity in one call.
-    """
     st.session_state.clear()
     st.rerun()
 
 
-# ── Role checks (used by other modules) ───────────────────────────────────────
-def current_user() -> dict | None:
-    """Returns the logged-in user dict from session_state, or None."""
+def current_user():
     return st.session_state.get("user")
 
 
-def is_admin() -> bool:
-    """Returns True if the current user has the admin role."""
+def is_admin():
     user = current_user()
-    return user is not None and user.get("role") == "admin"
+    return user and user["role"] == "admin"
 
 
 def require_login():
-    """
-    Call at the top of any page function that needs authentication.
-    Stops rendering and shows a warning if no user is in session.
-    """
-    if current_user() is None:
-        st.warning("Please log in to access this page.")
+    if not current_user():
+        st.warning("Login required")
         st.stop()
 
 
 def require_admin():
-    """
-    Call at the top of any page function that needs admin privileges.
-    Stops rendering with an error if the user is not an admin.
-    """
     require_login()
+
     if not is_admin():
-        st.error("Access denied. Admin privileges required.")
+        st.error("Admin only")
         st.stop()

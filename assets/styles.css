@@ -1,0 +1,105 @@
+/* Google font */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+}
+
+/* App background */
+.stApp {
+    background: linear-gradient(135deg, #0f172a 0%, #111827 50%, #1e293b 100%);
+    color: #f8fafc;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: rgba(15, 23, 42, 0.95);
+    border-right: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Hide Streamlit branding */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* Buttons */
+.stButton > button {
+    border-radius: 14px;
+    height: 48px;
+    font-weight: 600;
+    border: none;
+    background: linear-gradient(90deg, #2563eb, #7c3aed);
+    color: white;
+    transition: all 0.25s ease;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0px 12px 30px rgba(37, 99, 235, 0.35);
+}
+
+/* Inputs */
+.stTextInput input,
+.stSelectbox div[data-baseweb="select"],
+.stNumberInput input {
+    border-radius: 12px !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    background: rgba(255,255,255,0.04) !important;
+    color: white !important;
+}
+
+/* Cards */
+.custom-card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+/* Metric cards */
+div[data-testid="stMetric"] {
+    background: rgba(255,255,255,0.05);
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Progress */
+.stProgress > div > div {
+    background: linear-gradient(90deg, #22c55e, #3b82f6);
+}
+
+/* Radio */
+.stRadio > div {
+    gap: 10px;
+}
+
+.stRadio label {
+    background: rgba(255,255,255,0.04);
+    border-radius: 12px;
+    padding: 14px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    border-radius: 12px;
+}
+
+/* Typography */
+h1 {
+    font-size: 2.4rem;
+    font-weight: 700;
+}
+
+h2 {
+    font-size: 1.8rem;
+    font-weight: 600;
+}
+
+h3 {
+    font-size: 1.3rem;
+}
